@@ -144,7 +144,7 @@ app.get("/products/:id", authenticateToken, async (req, res) => {
 // ---------------------------
 // POST New Product
 // ---------------------------
-app.post("/products", async (req, res) => {
+app.post("/products", authenticateToken,async (req, res) => {
   const { productName, description, quantity, price } = req.body;
 
   if (!productName || !quantity || !price) {
