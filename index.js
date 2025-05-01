@@ -1,6 +1,6 @@
 require("dotenv").config();
 const express = require("express");
-const mysql = require("mysql2/promise");
+const { Pool } = require("pg");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 
@@ -8,18 +8,16 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET;
 
-// Middleware
 app.use(express.json());
 
-// DB Connection function
-async function getDBConnection() {
-  return await mysql.createConnection({
-    host: process.env.DB_HOST,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASS,
-    database: process.env.DB_NAME,
-  });
-}
+// PostgreSQL connection pool
+const pool = new Pool({
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASS,
+  database: process.env.DB_NAME,
+  port: process.env.DB_PORT || 5432,
+});
 
 // ---------------------------
 // User Signup Route
@@ -32,21 +30,19 @@ app.post("/signup", async (req, res) => {
   }
 
   try {
-    const db = await getDBConnection();
-
-    const [existing] = await db.execute(
-      "SELECT * FROM usersapi WHERE email = ?",
+    const existingUser = await pool.query(
+      "SELECT * FROM usersapi WHERE email = $1",
       [email]
     );
 
-    if (existing.length > 0) {
+    if (existingUser.rows.length > 0) {
       return res.status(400).json({ error: "User already exists" });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    await db.execute(
-      "INSERT INTO usersapi (username, email, password) VALUES (?, ?, ?)",
+    await pool.query(
+      "INSERT INTO usersapi (username, email, password) VALUES ($1, $2, $3)",
       [username, email, hashedPassword]
     );
 
@@ -64,24 +60,23 @@ app.post("/login", async (req, res) => {
   const { email, password } = req.body;
 
   try {
-    const db = await getDBConnection();
+    const userResult = await pool.query(
+      "SELECT * FROM usersapi WHERE email = $1",
+      [email]
+    );
 
-    const [users] = await db.execute("SELECT * FROM usersapi WHERE email = ?", [
-      email,
-    ]);
-
-    if (users.length === 0) {
+    if (userResult.rows.length === 0) {
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
-    const user = users[0];
+    const user = userResult.rows[0];
     const match = await bcrypt.compare(password, user.password);
 
     if (!match) {
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
-    const token = jwt.sign({ id: user.id, email }, JWT_SECRET, {
+    const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, {
       expiresIn: "1h",
     });
 
@@ -97,7 +92,7 @@ app.post("/login", async (req, res) => {
 // ---------------------------
 function authenticateToken(req, res, next) {
   const authHeader = req.headers["authorization"];
-  const token = authHeader && authHeader.split(" ")[1]; // Bearer <token>
+  const token = authHeader && authHeader.split(" ")[1];
 
   if (!token) {
     return res.status(401).json({ error: "Token required" });
@@ -114,43 +109,41 @@ function authenticateToken(req, res, next) {
 }
 
 // ---------------------------
-// GET All Products (Protected)
+// GET All Products
 // ---------------------------
 app.get("/products", authenticateToken, async (req, res) => {
   try {
-    const db = await getDBConnection();
-    const [rows] = await db.execute("SELECT * FROM productsapi");
-    res.json(rows);
+    const result = await pool.query("SELECT * FROM productsapi");
+    res.json(result.rows);
   } catch (err) {
-    console.error("DB Error:", err);
+    console.error(err);
     res.status(500).json({ error: "Failed to fetch products" });
   }
 });
 
 // ---------------------------
-// GET Product by ID (Protected)
+// GET Product by ID
 // ---------------------------
 app.get("/products/:id", authenticateToken, async (req, res) => {
   try {
-    const db = await getDBConnection();
-    const [rows] = await db.execute(
-      "SELECT * FROM productsapi WHERE productId = ?",
+    const result = await pool.query(
+      "SELECT * FROM productsapi WHERE productId = $1",
       [req.params.id]
     );
 
-    if (rows.length === 0) {
+    if (result.rows.length === 0) {
       return res.status(404).json({ error: "Product not found" });
     }
 
-    res.json(rows[0]);
+    res.json(result.rows[0]);
   } catch (err) {
-    console.error("DB Error:", err);
+    console.error(err);
     res.status(500).json({ error: "Failed to fetch product" });
   }
 });
 
 // ---------------------------
-// POST New Product (Protected)
+// POST New Product
 // ---------------------------
 app.post("/products", authenticateToken, async (req, res) => {
   const { productName, description, quantity, price } = req.body;
@@ -160,69 +153,67 @@ app.post("/products", authenticateToken, async (req, res) => {
   }
 
   try {
-    const db = await getDBConnection();
-    const [result] = await db.execute(
-      "INSERT INTO productsapi (productName, description, quantity, price) VALUES (?, ?, ?, ?)",
+    const result = await pool.query(
+      "INSERT INTO productsapi (productName, description, quantity, price) VALUES ($1, $2, $3, $4) RETURNING productId",
       [productName, description, quantity, price]
     );
 
-    res
-      .status(201)
-      .json({ message: "Product added", productId: result.insertId });
+    res.status(201).json({
+      message: "Product added",
+      productId: result.rows[0].productid,
+    });
   } catch (err) {
-    console.error("DB Error:", err);
+    console.error(err);
     res.status(500).json({ error: "Failed to add product" });
   }
 });
 
 // ---------------------------
-// PUT Update Product (Protected)
+// PUT Update Product
 // ---------------------------
 app.put("/products/:id", authenticateToken, async (req, res) => {
   const { productName, description, quantity, price } = req.body;
 
   try {
-    const db = await getDBConnection();
-    const [result] = await db.execute(
-      "UPDATE productsapi SET productName = ?, description = ?, quantity = ?, price = ? WHERE productId = ?",
+    const result = await pool.query(
+      "UPDATE productsapi SET productName = $1, description = $2, quantity = $3, price = $4 WHERE productId = $5",
       [productName, description, quantity, price, req.params.id]
     );
 
-    if (result.affectedRows === 0) {
+    if (result.rowCount === 0) {
       return res.status(404).json({ error: "Product not found" });
     }
 
     res.json({ message: "Product updated" });
   } catch (err) {
-    console.error("DB Error:", err);
+    console.error(err);
     res.status(500).json({ error: "Failed to update product" });
   }
 });
 
 // ---------------------------
-// DELETE Product (Protected)
+// DELETE Product
 // ---------------------------
 app.delete("/products/:id", authenticateToken, async (req, res) => {
   try {
-    const db = await getDBConnection();
-    const [result] = await db.execute(
-      "DELETE FROM productsapi WHERE productId = ?",
+    const result = await pool.query(
+      "DELETE FROM productsapi WHERE productId = $1",
       [req.params.id]
     );
 
-    if (result.affectedRows === 0) {
+    if (result.rowCount === 0) {
       return res.status(404).json({ error: "Product not found" });
     }
 
     res.json({ message: "Product deleted" });
   } catch (err) {
-    console.error("DB Error:", err);
+    console.error(err);
     res.status(500).json({ error: "Failed to delete product" });
   }
 });
 
 // ---------------------------
-// PATCH Update Product Fields (Protected)
+// PATCH Product Fields
 // ---------------------------
 app.patch("/products/:id", authenticateToken, async (req, res) => {
   const updates = req.body;
@@ -232,26 +223,24 @@ app.patch("/products/:id", authenticateToken, async (req, res) => {
   }
 
   try {
-    const db = await getDBConnection();
-
     const fields = Object.keys(updates)
-      .map((field) => `${field} = ?`)
+      .map((field, idx) => `${field} = $${idx + 1}`)
       .join(", ");
     const values = Object.values(updates);
     values.push(req.params.id);
 
-    const [result] = await db.execute(
-      `UPDATE productsapi SET ${fields} WHERE productId = ?`,
+    const result = await pool.query(
+      `UPDATE productsapi SET ${fields} WHERE productId = $${values.length}`,
       values
     );
 
-    if (result.affectedRows === 0) {
+    if (result.rowCount === 0) {
       return res.status(404).json({ error: "Product not found" });
     }
 
     res.json({ message: "Product updated successfully" });
   } catch (err) {
-    console.error("DB Error:", err);
+    console.error(err);
     res.status(500).json({ error: "Failed to update product" });
   }
 });
