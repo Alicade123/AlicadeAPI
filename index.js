@@ -11,10 +11,10 @@ app.use(express.json());
 
 // PostgreSQL connection pool - Hardcoding DB credentials
 const pool = new Pool({
-  host: "dpg-d0vf0oumcj7s73ej72d0-a.oregon-postgres.render.com", // DB Host
+  host: "dpg-d08e2dhr0fns73btkou0-a", // DB Host
   user: "postgre", // DB User
-  password: "UMYaR3flqT5X0s1Qbxfr2qIETbw8EETS", // DB Password
-  database: "e_commerce_nc7q", // DB Name
+  password: "KogCYgJNylIH5wrVuixjb4WL8jgtb0cj", // DB Password
+  database: "e_commerce_yn7z", // DB Name
   port: 5432, // DB Port
 });
 
@@ -76,7 +76,7 @@ app.post("/login", async (req, res) => {
     }
 
     const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, {
-      expiresIn: "1h",
+      expiresIn: "45d",
     });
 
     res.json({ token });
@@ -144,7 +144,7 @@ app.get("/products/:id", authenticateToken, async (req, res) => {
 // ---------------------------
 // POST New Product
 // ---------------------------
-app.post("/products", async (req, res) => {
+app.post("/products", authenticateToken, async (req, res) => {
   const { productName, description, quantity, price } = req.body;
 
   if (!productName || !quantity || !price) {
