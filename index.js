@@ -11,10 +11,10 @@ app.use(express.json());
 
 // PostgreSQL connection pool - Hardcoding DB credentials
 const pool = new Pool({
-  host: "dpg-d08e2dhr0fns73btkou0-a", // DB Host
+  host: "dpg-d0vf0oumcj7s73ej72d0-a.oregon-postgres.render.com", // DB Host
   user: "postgre", // DB User
-  password: "KogCYgJNylIH5wrVuixjb4WL8jgtb0cj", // DB Password
-  database: "e_commerce_yn7z", // DB Name
+  password: "UMYaR3flqT5X0s1Qbxfr2qIETbw8EETS", // DB Password
+  database: "e_commerce_nc7q", // DB Name
   port: 5432, // DB Port
 });
 
